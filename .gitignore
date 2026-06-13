@@ -15,7 +15,7 @@ __pycache__/
 *.json
 
 # But keep the HETP lookup table
-!2_study_design_to_loe_HETP.json
+!01_study_design_to_loe_HETP.json
 
 # C extensions
 *.so
