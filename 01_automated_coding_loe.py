@@ -1,6 +1,6 @@
 """
-egm_add_loe.py
-==============
+01_automated_coding_loe.py
+===========================
 Adds a Level of Evidence (LoE) code to each reference in a WCT EVI MAP
 coding JSON file, and splits references that carry more than one
 characteristic into one record per characteristic.
@@ -27,13 +27,13 @@ Processing steps
 
 Usage
 -----
-    python egm_add_loe.py <path_to_wp_json>
+    python 01_automated_coding_loe.py <path_to_wp_json>
 
 Arguments
 ---------
     path_to_wp_json : Path to the EPPI-Reviewer export JSON file to process.
 
-The study design to LoE lookup file (2_study_design_to_loe_HETP.json) is
+The study design to LoE lookup file (01_study_design_to_loe_HETP.json) is
 expected to reside in the same directory as this script.
 """
 
