@@ -31,7 +31,7 @@ Usage
 
 Arguments
 ---------
-    path_to_wp_json : Path to the EPPI-Reviewer export JSON file to process (default: current path)
+    path_to_wp_json : Path to the EPPI-Reviewer export JSON file to process.
 
 The study design to LoE lookup file (01_study_design_to_loe_HETP.json) is
 expected to reside in the same directory as this script.
