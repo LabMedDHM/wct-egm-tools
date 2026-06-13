@@ -3,6 +3,15 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Project data and outputs
+*.json
+1_JSON_before_LoE/
+2_JSON_after_LoE/
+3_JSON_merged_and_EGM/
+4_Figures/
+5_Tables/
+6_Supplemental_material/
+
 # C extensions
 *.so
 
