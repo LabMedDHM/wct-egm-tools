@@ -2,28 +2,28 @@
 01_automated_coding_loe.py
 ===========================
 Adds a Level of Evidence (LoE) code to each reference in a WCT EVI MAP
-coding JSON file, and splits references that carry more than one
+coding JSON file and splits references that carry more than one tumour
 characteristic into one record per characteristic.
 
 Background
 ----------
-Each reference in the EPPI-Reviewer export is coded with one or more
-tumour types, one or more characteristics (e.g. Histopathology, Prognosis),
+Each reference in the EPPI-Reviewer JSON export is coded with one or more
+tumour types, one or more characteristics (e.g. Histopathology, Prognosis)
 and a study design. The LoE is not stored directly in the export but is
 derived from the combination of characteristic and study design using the
 HETP (Hierarchy of Research Evidence in Tumour Pathology) lookup table
-stored in 2_study_design_to_loe_HETP.json.
+stored in 01_study_design_to_loe_HETP.json.
 
 Processing steps
 ----------------
 1. Consistency check: every reference must have at least one characteristic,
-   one study design, and one tumour type coded.
+   one study design and one tumour type coded.
 2. For each reference, the appropriate LoE is looked up and added as a code.
 3. References with multiple characteristics are duplicated into one record
    per characteristic (each copy retaining only that characteristic's code).
 4. The extended data is written to a new file with the suffix _loe.json.
-5. Summary statistics (counts per tumour type, characteristic, and LoE) are
-   printed to the console.
+5. Summary statistics (counts per tumour type, characteristic and LoE) are
+   printed to the terminal.
 
 Usage
 -----
@@ -31,7 +31,7 @@ Usage
 
 Arguments
 ---------
-    path_to_wp_json : Path to the EPPI-Reviewer export JSON file to process.
+    path_to_wp_json : Path to the EPPI-Reviewer export JSON file to process (default: current path)
 
 The study design to LoE lookup file (01_study_design_to_loe_HETP.json) is
 expected to reside in the same directory as this script.
@@ -255,12 +255,12 @@ def get_study_design_and_level(
 
 
 def get_current_tumour_types(ref_codes: list, tumour_types: list) -> list:
-    """Print the amount of each characteristic and study
+    """Print the amount of each tumour characteristic and study
     design for each tumour type found.
 
     Args:
         ref_codes (`list`): Codes of the reference.
-        tumour_types (`list`): LIst of all tumour types.
+        tumour_types (`list`): List of all tumour types.
 
      Returns:
         `list`: Tumour types found, if any. Otherwise an
@@ -355,7 +355,7 @@ def add_text_to_codes(codes: list, code_sets: dict) -> None:
 
 
 def print_statistics(wp_content: dict, tumour_types: list) -> None:
-    """Print the amount of each characteristic and study
+    """Print the amount of each tumour characteristic and study
     design for each tumour type found.
 
     Args:
@@ -397,16 +397,16 @@ def count_presplit_multiples(
     wp_content: dict, code_sets: dict, tumour_types: list, characteristics: list
 ) -> tuple[int, int, int, int]:
     """Count, on the original WP data (pre-splitting), how many records
-    have multiple tumour types and how many have multiple characteristics.
+    have multiple tumour types and how many have multiple tumour characteristics.
     Also count, on the same data, how many unique records are affected by
-    either condition (each record counted once even if both conditions hold),
+    either condition (each record counted once even if both conditions hold)
     and how many records are coded as Systematic Review.
 
     Args:
         wp_content (`dict`): Current WP content.
         code_sets (`dict`): Mapping from code ID to description.
         tumour_types (`list`): All tumour types detected in the WP file.
-        characteristics (`list`): All characteristics (keys of study_design_to_level).
+        characteristics (`list`): All tumour characteristics (keys of study_design_to_level).
 
     Returns:
         `tuple[int, int, int, int]`: (records_with_multiple_tumour_types,
@@ -461,7 +461,7 @@ def check_coding_consistency(
         wp_content (`dict`): Current WP content.
         study_design_to_level (`dict`): Dictionary containing characteristics and
         their corresponding study designs and level of evidence.
-        tumour_types (`list`): List of all tomour types.
+        tumour_types (`list`): List of all tumour types.
         code_sets (`dict`): Dictionary containing code and description.
 
     Returns:
@@ -544,7 +544,7 @@ def get_characteristics_loe_count(
 
     Args:
         wp_content (`dict`): Current WP content.
-        tumour_types (`str`): Current tomour type.
+        tumour_type (`str`): Current tumour type.
         study_design_to_level (`dict`): Dictionary containing characteristics and
         their corresponding study designs and level of evidence.
     """
