@@ -4,7 +4,7 @@ egm_common.py
 Shared core for the WCT EVI MAP figure and table generator. It turns one
 merged Blue Book JSON (the output of 02_merge_json_files.py after LoE coding)
 into tidy data, and holds every styling and ordering decision so that all
-figures and tables come out identical across thedifferent Blue Books.
+figures and tables come out identical across the different Blue Books.
 
 This module produces no final files. It is imported, not run, which is why it
 carries no numeric filename prefix.
@@ -156,6 +156,15 @@ SOURCE_MAP_OF_GROUP: Dict[str, str] = {
     "Embryonal tumours": "Medulloblastoma",
 }
 
+# Display-only short labels for source maps in figure legends, axes and panel
+# titles. The canonical source-map key is kept for splitting, file naming and
+# table contents; only the reader-facing figure label is shortened.
+SOURCE_MAP_DISPLAY: Dict[str, str] = {
+    "Follicular cell-derived neoplasms \u2013 Benign tumours":     "Benign tumours",
+    "Follicular cell-derived neoplasms \u2013 Low-risk neoplasms": "Low-risk neoplasms",
+    "Follicular cell-derived neoplasms \u2013 Malignant neoplasms": "Malignant neoplasms",
+}
+
 
 def display_char(name: str) -> str:
     """Characteristic display label (short form where defined)."""
@@ -167,6 +176,11 @@ def display_design(label: Optional[str]) -> Optional[str]:
     if label is None:
         return None
     return STUDY_DESIGN_DISPLAY.get(label, label)
+
+
+def display_map(name: str) -> str:
+    """Source-map display label for figures (short form where defined)."""
+    return SOURCE_MAP_DISPLAY.get(name, name)
 
 
 def source_map_of_group(group_name: str) -> str:
@@ -408,7 +422,7 @@ def tables_dir(base: str) -> Path:
 
 
 def supplements_dir(base: str) -> Path:
-    p = Path(base) / "supplements"
+    p = Path(base) / "6_Supplemental_material"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
