@@ -14,7 +14,7 @@ Usage
 Outputs (created next to the merged file, or under --output-dir):
     4_Figures/     Figure 3 to Figure 7 (main text)
     5_Tables/      Table 1 (main text)
-    supplements/   Figure S1, Figure S2, Table S1, Table S2, Table S3, HETP
+    6_Supplemental_material/   Figure S1, Figure S2, Table S1, Table S2, Table S3, HETP
 
 Author-made Figures 1 (map screenshot) and 2 (PRISMA flowchart) are not
 produced here.
