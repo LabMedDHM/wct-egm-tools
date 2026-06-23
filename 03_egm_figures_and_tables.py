@@ -218,43 +218,60 @@ def fig3_studies_per_year(data, entries, idx, outdir) -> None:
 
     fig, ax = plt.subplots(figsize=(10, 6.5))
     x = np.arange(len(years))
+    bar_width = 0.62
     bottoms = np.zeros(len(years))
     totals = np.sum([counts[m] for m in stack_order], axis=0)
-    threshold = max(3, int(round(0.03 * (totals.max() or 1))))
 
     for m in stack_order:
         vals = np.array(counts[m])
-        ax.bar(x, vals, bottom=bottoms, width=0.62, color=colours[m],
-               edgecolor="white", linewidth=0.5, label=m)
-        for xi, (v, b) in enumerate(zip(vals, bottoms)):
-            if v >= threshold:
-                rgba = colours[m]
-                lum = 0.299 * rgba[0] + 0.587 * rgba[1] + 0.114 * rgba[2]
-                ax.text(xi, b + v / 2, f"{int(v)}", ha="center", va="center",
-                        fontsize=8, color="white" if lum < 0.55 else "black")
+        bars = ax.bar(x, vals, bar_width, bottom=bottoms, color=colours[m],
+                      edgecolor="white", linewidth=0.6, label=ec.display_map(m))
+        # Per-segment counts, centred, only where the segment is tall enough.
+        for i, (bar, value) in enumerate(zip(bars, vals)):
+            if value <= 0:
+                continue
+            seg_height = bar.get_height()
+            if seg_height < 25:
+                continue
+            r, g_c, b, _ = colours[m]
+            lum = 0.299 * r + 0.587 * g_c + 0.114 * b
+            ax.text(bar.get_x() + bar.get_width() / 2, bottoms[i] + seg_height / 2,
+                    f"{int(value)}", ha="center", va="center", fontsize=9.5,
+                    color="white" if lum < 0.55 else "black", fontweight="medium")
         bottoms += vals
 
-    for xi, t in enumerate(totals):
-        if t > 0:
-            ax.text(xi, t + totals.max() * 0.01, f"{int(t)}", ha="center",
-                    va="bottom", fontsize=9, fontweight="bold")
-
-    # Headroom so the bold totals clear the top spine and the legend.
-    ax.set_ylim(0, totals.max() * 1.15)
+    # Grand totals on top of each bar.
+    for xi, total in zip(x, totals):
+        if total > 0:
+            ax.text(xi, total + totals.max() * 0.012, f"{int(total)}",
+                    ha="center", va="bottom", fontsize=11, fontweight="bold",
+                    color="black")
 
     ax.set_xticks(x)
-    ax.set_xticklabels([str(y) for y in years], rotation=0)
-    ax.set_xlabel("Publication year")
-    ax.set_ylabel("Number of studies")
-    ax.set_title(f"Studies per publication year, {ec.book_name(data)}")
-    ax.grid(axis="y", linestyle="--", linewidth=0.5, alpha=0.5)
+    ax.set_xticklabels([str(y) for y in years], fontsize=11)
+    ax.set_xlabel("Publication year", fontsize=12, labelpad=8)
+    ax.set_ylabel("Number of studies", fontsize=12, labelpad=8)
+    ax.set_title(f"Studies per year by tumour group ({years[0]} to {years[-1]})",
+                 fontsize=13, pad=14)
+
+    # Headroom for the total labels above each bar.
+    ceiling = totals.max() * 1.12
+    ax.set_yticks(np.arange(0, ceiling + 1, 200))
+    ax.set_ylim(0, ceiling)
+    ax.tick_params(axis="y", labelsize=10)
+
+    ax.yaxis.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
     ax.set_axisbelow(True)
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
+
+    # Legend outside on the right, items sorted alphabetically top to bottom.
     handles, labels = ax.get_legend_handles_labels()
     order = sorted(range(len(labels)), key=lambda i: labels[i].lower())
     ax.legend([handles[i] for i in order], [labels[i] for i in order],
-              title="Source map", loc="upper left", frameon=False)
+              loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=True,
+              edgecolor="lightgray", fontsize=10, title="Tumour group",
+              title_fontsize=10.5)
     fig.tight_layout()
 
     ec.save_figure(fig, ec.figures_dir(outdir), "Figure3_studies_per_year")
@@ -291,7 +308,7 @@ def fig4_study_designs(data, entries, idx, outdir) -> None:
     for m in stack_order:
         vals = np.array(counts[m])
         ax.barh(y, vals, left=lefts, height=0.66, color=colours[m],
-                edgecolor="white", linewidth=0.5, label=m)
+                edgecolor="white", linewidth=0.5, label=ec.display_map(m))
         lefts += vals
     totals = lefts
     for yi, t in enumerate(totals):
@@ -385,7 +402,7 @@ def figS1_characteristics_by_loe_by_group(data, entries, idx, outdir) -> None:
     for k, m in enumerate(maps):
         raw = by_map[by_map["source_map"] == m]
         counts = _char_loe_counts(raw)
-        _plot_char_loe(axes[k][0], counts, m)
+        _plot_char_loe(axes[k][0], counts, ec.display_map(m))
         for i, ch in enumerate(ec.CHARACTERISTIC_ORDER):
             row = {"Source map": m, "Characteristic": ch}
             for j, loe in enumerate(ec.LOE_ORDER):
@@ -432,7 +449,7 @@ def figS2_tumour_type_by_loe_by_group(data, entries, idx, outdir) -> None:
         ax.set_yticklabels(leaves, fontsize=8.5)
         ax.invert_yaxis()
         ax.set_xlabel("Number of records")
-        ax.set_title(m)
+        ax.set_title(ec.display_map(m))
         ax.grid(axis="x", linestyle="--", linewidth=0.5, alpha=0.5)
         ax.set_axisbelow(True)
         for s in ("top", "right"):
@@ -498,7 +515,7 @@ def fig6_high_loe_heatmap(data, entries, idx, outdir) -> None:
     ax.set_xticklabels([ec.display_char(c) for c in chars], rotation=30,
                        ha="right")
     ax.set_yticks(np.arange(len(maps)))
-    ax.set_yticklabels(maps)
+    ax.set_yticklabels([ec.display_map(m) for m in maps])
     ax.set_xlabel("Characteristic", labelpad=10)
     ax.set_ylabel("Source map", labelpad=10)
     ax.set_title(f"High-level evidence (P1 plus P2) by source map and "
@@ -602,7 +619,7 @@ def fig7_gap_matrix(data, entries, idx, outdir) -> None:
         if cumulative < n_rows:
             ax.axhline(cumulative - 0.5, color="black", linewidth=1.4)
         if n == 1:
-            ax.annotate(m, xy=(label_x, start), xycoords="data", ha="left",
+            ax.annotate(ec.display_map(m), xy=(label_x, start), xycoords="data", ha="left",
                         va="center", fontsize=9, color="#333333",
                         fontweight="bold", annotation_clip=False)
         else:
@@ -614,7 +631,7 @@ def fig7_gap_matrix(data, entries, idx, outdir) -> None:
             for yb in (top, bot):
                 ax.plot([bracket_x, bracket_x + 0.15], [yb, yb],
                         color="#333333", linewidth=1.4, clip_on=False)
-            ax.annotate(m, xy=(label_x, (start + end) / 2), xycoords="data",
+            ax.annotate(ec.display_map(m), xy=(label_x, (start + end) / 2), xycoords="data",
                         ha="left", va="center", fontsize=9, color="#333333",
                         fontweight="bold", annotation_clip=False)
 
