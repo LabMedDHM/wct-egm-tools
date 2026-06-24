@@ -4,7 +4,7 @@ egm_common.py
 Shared core for the WCT EVI MAP figure and table generator. It turns one
 merged Blue Book JSON (the output of 02_merge_json_files.py after LoE coding)
 into tidy data, and holds every styling and ordering decision so that all
-figures and tables come out identical across the different Blue Books.
+figures and tables come out identical across the four Blue Books.
 
 This module produces no final files. It is imported, not run, which is why it
 carries no numeric filename prefix.

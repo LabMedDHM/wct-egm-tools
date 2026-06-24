@@ -45,6 +45,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.patheffects as pe
+from matplotlib.colors import to_rgb
 
 import egm_common as ec
 
@@ -196,6 +198,97 @@ def table1_details_of_egm(data, entries, idx, outdir) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Table 2: evidence-level summary by tumour group
+# ---------------------------------------------------------------------------
+
+def table2_evidence_level_by_tumour_group(data, entries, idx, outdir) -> None:
+    """Evidence-level summary: tumour groups in the rows, evidence-level bands
+    in the columns (high P1 to P2, moderate P3, low P4 to P5, unclassifiable),
+    with a total column on the right and a total row at the bottom. Counting
+    unit: raw EGM entries, each counted once for its source map."""
+    maps = idx["map_order"]
+    by_map = ec.raw_entries_by_map(entries)
+
+    bands = [
+        ("High-level evidence, P1 to P2, n (%)", ec.HIGH_LOE),
+        ("Moderate-level evidence, P3, n (%)", {"Level P3"}),
+        ("Low-level evidence, P4 to P5, n (%)", ec.LOW_LOE),
+        ("Unclassifiable, n (%)", {"Unclassifiable"}),
+    ]
+
+    counts = {}
+    for m in maps:
+        seg = by_map[by_map["source_map"] == m]
+        counts[m] = {col: int(seg["loe"].isin(levels).sum()) for col, levels in bands}
+        counts[m]["total"] = sum(counts[m][col] for col, _ in bands)
+
+    col_tot = {col: sum(counts[m][col] for m in maps) for col, _ in bands}
+    grand = sum(counts[m]["total"] for m in maps)
+
+    rows = []
+    for m in maps:
+        row = {"Tumour group": ec.display_map(m)}
+        for col, _ in bands:
+            row[col] = _pct(counts[m][col], counts[m]["total"])
+        row["Total, n (%)"] = _pct(counts[m]["total"], grand)
+        rows.append(row)
+    trow = {"Tumour group": "Total"}
+    for col, _ in bands:
+        trow[col] = _pct(col_tot[col], grand)
+    trow["Total, n (%)"] = _pct(grand, grand)
+    rows.append(trow)
+
+    cols = ["Tumour group"] + [c for c, _ in bands] + ["Total, n (%)"]
+    out_df = pd.DataFrame(rows)[cols]
+    path = ec.save_table(out_df, ec.tables_dir(outdir),
+                         "Table2_evidence_level_by_tumour_group")
+    print(f"[Table2] saved to {path.name}. Grand total entries: {grand:,}")
+
+
+# ---------------------------------------------------------------------------
+# Table S4: level of evidence by characteristic and tumour group (Uro format)
+# ---------------------------------------------------------------------------
+
+def tableS4_loe_by_characteristic_and_group(data, entries, idx, outdir) -> None:
+    """LoE distribution across characteristics by tumour group, one combined
+    table with a subtotal per characteristic, in the Uro publication format.
+    Counting unit: raw EGM entries, each counted once for its source map."""
+    maps = idx["map_order"]
+    by_map = ec.raw_entries_by_map(entries)
+    loe_cols = [f"{loe}, n (%)" for loe in ec.LOE_ORDER]
+
+    rows = []
+    grand = 0
+    for ch in ec.CHARACTERISTIC_ORDER:
+        sub_per_loe = {loe: 0 for loe in ec.LOE_ORDER}
+        for i, m in enumerate(maps):
+            seg = by_map[(by_map["source_map"] == m) &
+                         (by_map["characteristic"] == ch)]
+            per_loe = {loe: int((seg["loe"] == loe).sum()) for loe in ec.LOE_ORDER}
+            row_total = sum(per_loe.values())
+            row = {"Tumour characteristic": ec.display_char(ch) if i == 0 else "",
+                   "Tumour group": ec.display_map(m),
+                   "Total n": f"{row_total:,}"}
+            for loe in ec.LOE_ORDER:
+                row[f"{loe}, n (%)"] = _pct(per_loe[loe], row_total)
+                sub_per_loe[loe] += per_loe[loe]
+            rows.append(row)
+        sub_total = sum(sub_per_loe.values())
+        grand += sub_total
+        srow = {"Tumour characteristic": "", "Tumour group": "Subtotal",
+                "Total n": f"{sub_total:,}"}
+        for loe in ec.LOE_ORDER:
+            srow[f"{loe}, n (%)"] = _pct(sub_per_loe[loe], sub_total)
+        rows.append(srow)
+
+    cols = ["Tumour characteristic", "Tumour group", "Total n"] + loe_cols
+    out_df = pd.DataFrame(rows)[cols]
+    path = ec.save_table(out_df, ec.supplements_dir(outdir),
+                         "TableS4_LoE_by_characteristic_and_group")
+    print(f"[TableS4] saved to {path.name}. Grand total entries: {grand:,}")
+
+
+# ---------------------------------------------------------------------------
 # Figure 3: unique studies per publication year, stacked by source map
 # ---------------------------------------------------------------------------
 
@@ -222,22 +315,29 @@ def fig3_studies_per_year(data, entries, idx, outdir) -> None:
     bottoms = np.zeros(len(years))
     totals = np.sum([counts[m] for m in stack_order], axis=0)
 
+    # Adaptive inline-label threshold: a segment is labelled inside when it is
+    # at least ~2.5% of the tallest bar (small absolute floor for low-volume
+    # plots). Anything smaller gets a callout with a leader line so every
+    # number appears.
+    max_total = int(totals.max()) if totals.max() > 0 else 1
+    inline_threshold = max(3, int(round(0.025 * max_total)))
+    segment_bottoms = {}
+
     for m in stack_order:
         vals = np.array(counts[m])
+        segment_bottoms[m] = bottoms.copy()
         bars = ax.bar(x, vals, bar_width, bottom=bottoms, color=colours[m],
                       edgecolor="white", linewidth=0.6, label=ec.display_map(m))
-        # Per-segment counts, centred, only where the segment is tall enough.
+        r, g_c, b, _ = colours[m]
+        lum = 0.299 * r + 0.587 * g_c + 0.114 * b
+        text_colour = "white" if lum < 0.55 else "black"
         for i, (bar, value) in enumerate(zip(bars, vals)):
-            if value <= 0:
-                continue
             seg_height = bar.get_height()
-            if seg_height < 25:
+            if seg_height < inline_threshold:
                 continue
-            r, g_c, b, _ = colours[m]
-            lum = 0.299 * r + 0.587 * g_c + 0.114 * b
             ax.text(bar.get_x() + bar.get_width() / 2, bottoms[i] + seg_height / 2,
                     f"{int(value)}", ha="center", va="center", fontsize=9.5,
-                    color="white" if lum < 0.55 else "black", fontweight="medium")
+                    color=text_colour, fontweight="medium")
         bottoms += vals
 
     # Grand totals on top of each bar.
@@ -247,6 +347,22 @@ def fig3_studies_per_year(data, entries, idx, outdir) -> None:
                     ha="center", va="bottom", fontsize=11, fontweight="bold",
                     color="black")
 
+    # Callouts for small segments, placed just right of the bar with a thin
+    # grey leader line and a white text outline for legibility.
+    for m in stack_order:
+        vals = np.array(counts[m])
+        for i, value in enumerate(vals):
+            if value <= 0 or value >= inline_threshold:
+                continue
+            seg_centre_y = float(segment_bottoms[m][i]) + value / 2
+            bar_right_edge = float(x[i]) + bar_width / 2
+            label_x = bar_right_edge + 0.08
+            ax.plot([bar_right_edge + 0.005, label_x - 0.015],
+                    [seg_centre_y, seg_centre_y], color="dimgray", lw=0.6, zorder=4)
+            txt = ax.text(label_x, seg_centre_y, f"{int(value)}", fontsize=9,
+                          color="black", ha="left", va="center", zorder=5)
+            txt.set_path_effects([pe.withStroke(linewidth=2.5, foreground="white")])
+
     ax.set_xticks(x)
     ax.set_xticklabels([str(y) for y in years], fontsize=11)
     ax.set_xlabel("Publication year", fontsize=12, labelpad=8)
@@ -254,9 +370,9 @@ def fig3_studies_per_year(data, entries, idx, outdir) -> None:
     ax.set_title(f"Studies per year by tumour group ({years[0]} to {years[-1]})",
                  fontsize=13, pad=14)
 
-    # Headroom for the total labels above each bar.
+    # Headroom for the total labels; matplotlib auto-picks the tick step,
+    # which gives 50-unit ticks at this scale as in the reports.
     ceiling = totals.max() * 1.12
-    ax.set_yticks(np.arange(0, ceiling + 1, 200))
     ax.set_ylim(0, ceiling)
     ax.tick_params(axis="y", labelsize=10)
 
@@ -288,13 +404,19 @@ def fig3_studies_per_year(data, entries, idx, outdir) -> None:
 
 def fig4_study_designs(data, entries, idx, outdir) -> None:
     maps = idx["map_order"]
-    # Unique studies per (study design, source map): one row per
-    # (study, design, map). A study with two designs counts under both.
+    # Counting unit: unique studies per map (study_id), one count per study
+    # design within a map. A study coded under several characteristics or LoE
+    # still counts once for its design in a given map. A cross-map study counts
+    # once in each map, so a bar length is the sum across maps, not the
+    # distinct union; the TSV Total column uses the same sum convention.
     per = entries.dropna(subset=["study_design"]).drop_duplicates(
         ["study_id", "study_design", "source_map"])
     designs = sorted(per["study_design"].unique(), key=str.lower)
     if not designs:
         print("[Figure4] no study designs found, skipping")
+        return
+    if len(maps) < 2:
+        print("[Figure4] only one map, skipping all-maps chart")
         return
 
     counts = {m: [int(((per["study_design"] == d) & (per["source_map"] == m)).sum())
@@ -302,33 +424,67 @@ def fig4_study_designs(data, entries, idx, outdir) -> None:
     stack_order = sorted(maps, key=lambda m: sum(counts[m]))
     colours = _map_colours(stack_order)
 
-    y = np.arange(len(designs))
-    fig, ax = plt.subplots(figsize=(11, max(5.5, 0.42 * len(designs) + 2)))
-    lefts = np.zeros(len(designs))
+    # Designs alphabetical top to bottom; reverse for matplotlib's bottom-up
+    # y-axis so alphabetical order reads top down on screen.
+    designs_plot = list(reversed(designs))
+    counts_plot = {m: list(reversed(counts[m])) for m in maps}
+
+    fig_h = max(5.0, 0.36 * len(designs) + 1.6)
+    fig, ax = plt.subplots(figsize=(11, fig_h))
+    y = np.arange(len(designs_plot))
+    bar_height = 0.62
+    lefts = np.zeros(len(designs_plot))
+
+    per_group_values = {}
     for m in stack_order:
-        vals = np.array(counts[m])
-        ax.barh(y, vals, left=lefts, height=0.66, color=colours[m],
-                edgecolor="white", linewidth=0.5, label=ec.display_map(m))
+        vals = np.array(counts_plot[m], dtype=float)
+        per_group_values[m] = vals
+        ax.barh(y, vals, bar_height, left=lefts, color=colours[m],
+                edgecolor="white", linewidth=0.6, label=ec.display_map(m))
         lefts += vals
-    totals = lefts
-    for yi, t in enumerate(totals):
-        if t > 0:
-            ax.text(t + totals.max() * 0.01, yi, f"{int(t)}", va="center",
-                    ha="left", fontsize=8.5, fontweight="bold")
+
+    totals = lefts.copy()
+    bar_max = float(totals.max()) if len(totals) else 1.0
+    inline_threshold = max(3, int(round(0.04 * bar_max)))
+
+    # Inline labels for segments at or above the threshold.
+    accum = np.zeros(len(designs_plot))
+    for m in stack_order:
+        vals = per_group_values[m]
+        r, g_c, b, _ = colours[m]
+        lum = 0.299 * r + 0.587 * g_c + 0.114 * b
+        text_colour = "white" if lum < 0.55 else "black"
+        for yi, v in zip(y, vals):
+            if v >= inline_threshold:
+                ax.text(accum[int(yi)] + v / 2, yi, f"{int(v)}", ha="center",
+                        va="center", fontsize=8.5, color=text_colour,
+                        fontweight="medium")
+        accum += vals
+
+    # Bold per-design totals at the right end of each bar.
+    for yi, total in zip(y, totals):
+        if total > 0:
+            ax.text(total + bar_max * 0.01, yi, f"{int(total):,}", ha="left",
+                    va="center", fontsize=9.5, fontweight="bold")
 
     ax.set_yticks(y)
-    ax.set_yticklabels(designs)
-    ax.invert_yaxis()  # alphabetical top to bottom
-    ax.set_xlabel("Number of studies")
-    ax.set_title(f"Study designs, {ec.book_name(data)}")
-    ax.grid(axis="x", linestyle="--", linewidth=0.5, alpha=0.5)
+    ax.set_yticklabels(designs_plot, fontsize=9)
+    ax.set_ylabel("Study design", labelpad=8)
+    ax.set_xlabel("Number of studies", fontsize=11, labelpad=8)
+    ax.set_title("Studies per study design", fontsize=12.5, pad=12)
+    ax.set_xlim(0, bar_max * 1.10 if bar_max > 0 else 1)
+    ax.xaxis.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
     ax.set_axisbelow(True)
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
+
+    # Legend alphabetical top to bottom, inside the lower-right corner where
+    # the shortest bars leave empty space.
     handles, labels = ax.get_legend_handles_labels()
-    order = sorted(range(len(labels)), key=lambda i: labels[i].lower())
+    order = sorted(range(len(labels)), key=lambda i: labels[i].casefold())
     ax.legend([handles[i] for i in order], [labels[i] for i in order],
-              title="Source map", loc="lower right", frameon=False)
+              loc="lower right", frameon=True, edgecolor="lightgray",
+              fontsize=10, title="Tumour group", title_fontsize=10.5)
     fig.tight_layout()
 
     ec.save_figure(fig, ec.figures_dir(outdir), "Figure4_study_designs")
@@ -353,20 +509,69 @@ def _char_loe_counts(raw: pd.DataFrame) -> np.ndarray:
     return counts
 
 
-def _plot_char_loe(ax, counts: np.ndarray, title: str) -> None:
+def _plot_char_loe(ax, counts: np.ndarray, title: str,
+                   inline_labels: bool = True, callouts: bool = True,
+                   ylabel: bool = True) -> None:
     x = np.arange(len(ec.CHARACTERISTIC_ORDER))
+    bar_width = 0.7
     bottoms = np.zeros(len(ec.CHARACTERISTIC_ORDER))
-    for j, loe in enumerate(ec.LOE_ORDER):
-        vals = counts[:, j]
-        ax.bar(x, vals, bottom=bottoms, width=0.7,
-               color=ec.LOE_COLOURS[loe], edgecolor="white", linewidth=0.4,
-               label=loe)
+    totals = counts.sum(axis=1)
+    max_total = int(totals.max()) if totals.max() > 0 else 1
+    inline_threshold = max(3, int(round(0.025 * max_total)))
+
+    # Draw order: Unclassifiable at the bottom up to Level P1 on top, so the
+    # highest level of evidence sits at the top of every bar.
+    draw_order = list(reversed(ec.LOE_ORDER))
+    for loe in draw_order:
+        j = ec.LOE_ORDER.index(loe)
+        vals = counts[:, j].astype(float)
+        ax.bar(x, vals, bar_width, bottom=bottoms, color=ec.LOE_COLOURS[loe],
+               edgecolor="white", linewidth=0.6, label=loe)
+        if inline_labels:
+            r, g_c, b = to_rgb(ec.LOE_COLOURS[loe])
+            lum = 0.299 * r + 0.587 * g_c + 0.114 * b
+            text_colour = "white" if lum < 0.55 else "black"
+            for i, v in enumerate(vals):
+                if v >= inline_threshold:
+                    ax.text(x[i], bottoms[i] + v / 2, f"{int(v)}", ha="center",
+                            va="center", fontsize=9.5, color=text_colour,
+                            fontweight="medium")
         bottoms += vals
+
+    # Grand totals on top of each bar.
+    for xi, total in zip(x, totals):
+        if total > 0:
+            ax.text(xi, total + max_total * 0.012, f"{int(total):,}",
+                    ha="center", va="bottom", fontsize=11, fontweight="bold",
+                    color="black")
+
+    # Callouts for small segments below the inline threshold, placed just right
+    # of the bar with a thin grey leader line and a white text outline.
+    if callouts:
+        cumulative = np.zeros(len(ec.CHARACTERISTIC_ORDER))
+        for loe in draw_order:
+            j = ec.LOE_ORDER.index(loe)
+            vals = counts[:, j]
+            for i, v in enumerate(vals):
+                if 0 < v < inline_threshold:
+                    bar_right = float(x[i]) + bar_width / 2
+                    label_x = bar_right + 0.08
+                    seg_centre = cumulative[i] + v / 2
+                    ax.plot([bar_right + 0.005, label_x - 0.015],
+                            [seg_centre, seg_centre], color="dimgray", lw=0.6, zorder=4)
+                    txt = ax.text(label_x, seg_centre, f"{int(v)}", fontsize=9,
+                                  color="black", ha="left", va="center", zorder=5)
+                    txt.set_path_effects([pe.withStroke(linewidth=2.5, foreground="white")])
+                cumulative[i] += v
+
     ax.set_xticks(x)
     ax.set_xticklabels([ec.display_char(c) for c in ec.CHARACTERISTIC_ORDER],
                        rotation=30, ha="right")
-    ax.set_ylabel("Number of entries")
+    ax.set_xlabel("Characteristics", labelpad=8)
+    if ylabel:
+        ax.set_ylabel("Number of EGM entries")
     ax.set_title(title)
+    ax.set_ylim(0, max_total * 1.12)
     ax.grid(axis="y", linestyle="--", linewidth=0.5, alpha=0.5)
     ax.set_axisbelow(True)
     for s in ("top", "right"):
@@ -377,10 +582,20 @@ def fig5_characteristics_by_loe(data, entries, idx, outdir) -> None:
     """Pooled across all tumour types: characteristic x LoE, raw entries."""
     raw = ec.raw_entries(entries)
     counts = _char_loe_counts(raw)
-    fig, ax = plt.subplots(figsize=(10, 6.5))
-    _plot_char_loe(ax, counts, f"Characteristics by level of evidence, "
-                               f"{ec.book_name(data)} (all tumour types)")
-    ax.legend(title="Level of evidence", loc="upper right", frameon=False)
+    fig, ax = plt.subplots(figsize=(11, 7))
+    _plot_char_loe(ax, counts,
+                   f"{ec.book_name(data)}: Characteristics by level of evidence",
+                   inline_labels=True, callouts=False)
+    # Legend in canonical LoE order (P1 first) outside on the right with a grey
+    # border, matching the Uro paper Figure 4.
+    handles, labels = ax.get_legend_handles_labels()
+    label_to_handle = dict(zip(labels, handles))
+    ordered = [(label_to_handle[l], l) for l in ec.LOE_ORDER if l in label_to_handle]
+    leg = ax.legend([h for h, _ in ordered], [l for _, l in ordered],
+                    loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=True,
+                    edgecolor="lightgray", fontsize=10, title="Level of Evidence",
+                    title_fontsize=10.5)
+    leg.get_frame().set_linewidth(0.6)
     fig.tight_layout()
     ec.save_figure(fig, ec.figures_dir(outdir),
                    "Figure5_characteristics_by_loe_pooled")
@@ -393,32 +608,59 @@ def fig5_characteristics_by_loe(data, entries, idx, outdir) -> None:
 
 
 def figS1_characteristics_by_loe_by_group(data, entries, idx, outdir) -> None:
-    """One panel per source map: characteristic x LoE, raw entries per map."""
+    """Panels two per row: characteristic x LoE, raw entries per map. For an
+    odd number of groups the legend sits in the empty grid cell beside the
+    last panel; for an even number it sits to the right of the grid."""
     maps = idx["map_order"]
     by_map = ec.raw_entries_by_map(entries)
     n = len(maps)
-    fig, axes = plt.subplots(n, 1, figsize=(10, 4.6 * n), squeeze=False)
+    ncols = 2 if n > 1 else 1
+    nrows = (n + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7.5 * ncols, 4.6 * nrows),
+                             squeeze=False)
     src_rows = []
     for k, m in enumerate(maps):
+        r, c = divmod(k, ncols)
         raw = by_map[by_map["source_map"] == m]
         counts = _char_loe_counts(raw)
-        _plot_char_loe(axes[k][0], counts, ec.display_map(m))
+        _plot_char_loe(axes[r][c], counts, ec.display_map(m),
+                       callouts=False, ylabel=False)
         for i, ch in enumerate(ec.CHARACTERISTIC_ORDER):
             row = {"Source map": m, "Characteristic": ch}
             for j, loe in enumerate(ec.LOE_ORDER):
                 row[loe] = int(counts[i, j])
             src_rows.append(row)
+
     handles, labels = axes[0][0].get_legend_handles_labels()
-    fig.legend(handles, labels, title="Level of evidence",
-               loc="upper right", frameon=False)
-    fig.suptitle(f"Characteristics by level of evidence per source map, "
-                 f"{ec.book_name(data)}", y=1.0, fontsize=13)
-    fig.tight_layout(rect=[0, 0, 1, 0.99])
+    label_to_handle = dict(zip(labels, handles))
+    ordered = [(label_to_handle[l], l) for l in ec.LOE_ORDER if l in label_to_handle]
+    leg_handles = [h for h, _ in ordered]
+    leg_labels = [l for _, l in ordered]
+
+    empty = nrows * ncols - n
+    if empty:
+        # Legend in the first empty cell, beside the last panel.
+        r, c = divmod(n, ncols)
+        axes[r][c].axis("off")
+        axes[r][c].legend(leg_handles, leg_labels, title="Level of Evidence",
+                          loc="center", frameon=True, edgecolor="lightgray")
+        for k in range(n + 1, nrows * ncols):  # any further empty cells
+            r2, c2 = divmod(k, ncols)
+            axes[r2][c2].axis("off")
+    else:
+        fig.legend(leg_handles, leg_labels, title="Level of Evidence",
+                   loc="center left", bbox_to_anchor=(1.0, 0.5), frameon=True,
+                   edgecolor="lightgray")
+
+    fig.supylabel("Number of EGM entries")
+    fig.suptitle(f"{ec.book_name(data)}: Characteristics by level of evidence "
+                 f"per tumour group", fontsize=13)
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
     ec.save_figure(fig, ec.supplements_dir(outdir),
                    "FigureS1_characteristics_by_loe_by_group")
     ec.save_table(pd.DataFrame(src_rows), ec.supplements_dir(outdir),
                   "FigureS1_characteristics_by_loe_by_group_data")
-    print(f"[FigureS1] saved. {n} panel(s).")
+    print(f"[FigureS1] saved. {n} panel(s) in {nrows}x{ncols} grid.")
 
 
 # ---------------------------------------------------------------------------
@@ -517,9 +759,9 @@ def fig6_high_loe_heatmap(data, entries, idx, outdir) -> None:
     ax.set_yticks(np.arange(len(maps)))
     ax.set_yticklabels([ec.display_map(m) for m in maps])
     ax.set_xlabel("Characteristic", labelpad=10)
-    ax.set_ylabel("Source map", labelpad=10)
-    ax.set_title(f"High-level evidence (P1 plus P2) by source map and "
-                 f"characteristic, {ec.book_name(data)}", pad=14)
+    ax.set_ylabel("Tumour group", labelpad=10)
+    ax.set_title("High-level evidence (P1 plus P2) by tumour group and "
+                 "characteristic", pad=14)
     ax.set_xticks(np.arange(len(chars) + 1) - 0.5, minor=True)
     ax.set_yticks(np.arange(len(maps) + 1) - 0.5, minor=True)
     ax.grid(which="minor", color="white", linewidth=2)
@@ -603,12 +845,12 @@ def fig7_gap_matrix(data, entries, idx, outdir) -> None:
                        ha="right")
     ax.set_yticks(range(n_rows))
     ax.set_yticklabels([leaf for _m, leaf in rows], fontsize=8.5)
-    ax.set_xlabel("Tumour characteristic", labelpad=10)
+    ax.set_xlabel("Characteristic", labelpad=10)
     ax.set_ylabel("Tumour type", labelpad=10)
-    ax.set_title(f"Gap classification by tumour type and characteristic, "
-                 f"{ec.book_name(data)}", pad=14)
+    ax.set_title("Gap classification by tumour type and characteristic", pad=14)
 
-    # Horizontal separators and right-side brackets per source map.
+    # Right-side brackets per source map. The bracket opens to the left so it
+    # reads as embracing the tumour-type rows that belong to the group.
     bracket_x = n_cols - 0.5 + 0.25
     label_x = bracket_x + 0.45
     cumulative = 0
@@ -616,31 +858,25 @@ def fig7_gap_matrix(data, entries, idx, outdir) -> None:
         n = len(idx["map_to_leaves"][m])
         start, end = cumulative, cumulative + n - 1
         cumulative += n
-        if cumulative < n_rows:
-            ax.axhline(cumulative - 0.5, color="black", linewidth=1.4)
-        if n == 1:
-            ax.annotate(ec.display_map(m), xy=(label_x, start), xycoords="data", ha="left",
-                        va="center", fontsize=9, color="#333333",
-                        fontweight="bold", annotation_clip=False)
-        else:
-            top, bot = start - 0.45, end + 0.45
-            ax.annotate("", xy=(bracket_x, top), xytext=(bracket_x, bot),
-                        xycoords="data", annotation_clip=False,
-                        arrowprops=dict(arrowstyle="-", color="#333333",
-                                        linewidth=1.4))
-            for yb in (top, bot):
-                ax.plot([bracket_x, bracket_x + 0.15], [yb, yb],
-                        color="#333333", linewidth=1.4, clip_on=False)
-            ax.annotate(ec.display_map(m), xy=(label_x, (start + end) / 2), xycoords="data",
-                        ha="left", va="center", fontsize=9, color="#333333",
-                        fontweight="bold", annotation_clip=False)
+        top, bot = start - 0.45, end + 0.45
+        ax.annotate("", xy=(bracket_x, top), xytext=(bracket_x, bot),
+                    xycoords="data", annotation_clip=False,
+                    arrowprops=dict(arrowstyle="-", color="#333333",
+                                    linewidth=1.4))
+        for yb in (top, bot):
+            ax.plot([bracket_x, bracket_x - 0.15], [yb, yb],
+                    color="#333333", linewidth=1.4, clip_on=False)
+        ax.annotate(ec.display_map(m), xy=(label_x, (start + end) / 2), xycoords="data",
+                    ha="left", va="center", fontsize=9, color="#333333",
+                    fontweight="bold", annotation_clip=False)
 
     legend_handles = [mpatches.Patch(facecolor=ec.GAP_PALETTE[c],
                                      edgecolor="#444444", label=c)
                       for c in ec.GAP_CATEGORIES]
-    ax.legend(handles=legend_handles, loc="lower left",
-              bbox_to_anchor=(1.02, 1.02), ncol=2, frameon=True,
-              edgecolor="lightgray", title="Gap category")
+    ax.legend(handles=legend_handles, loc="lower right",
+              bbox_to_anchor=(0.98, 0.02), bbox_transform=fig.transFigure,
+              ncol=2, frameon=True, edgecolor="lightgray", fontsize=10,
+              title="Gap category", title_fontsize=11)
     ax.set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
     ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
     ax.grid(which="minor", color="white", linewidth=1.5)
@@ -805,6 +1041,7 @@ def supp_hetp(data, entries, idx, outdir) -> None:
 BUILDERS = {
     # main text
     "table1_details_of_egm":                 table1_details_of_egm,
+    "table2_evidence_level_by_tumour_group": table2_evidence_level_by_tumour_group,
     "fig3_studies_per_year":                 fig3_studies_per_year,
     "fig4_study_designs":                    fig4_study_designs,
     "fig5_characteristics_by_loe":           fig5_characteristics_by_loe,
@@ -816,6 +1053,7 @@ BUILDERS = {
     "tableS1_type_by_characteristic":        tableS1_type_by_characteristic,
     "tableS2_type_by_loe":                   tableS2_type_by_loe,
     "tableS3_characteristics_by_loe":        tableS3_characteristics_by_loe,
+    "tableS4_loe_by_characteristic_and_group": tableS4_loe_by_characteristic_and_group,
     "supp_hetp":                             supp_hetp,
 }
 
