@@ -13,8 +13,9 @@ Usage
 
 Outputs (created next to the merged file, or under --output-dir):
     4_Figures/     Figure 3 to Figure 7 (main text)
-    5_Tables/      Table 1 (main text)
-    6_Supplemental_material/   Figure S1, Figure S2, Table S1, Table S2, Table S3, HETP
+    5_Tables/      Table 1 and Table 2 (main text)
+    6_Supplemental_material/   Figure S1, Figure S2, Table S1, Table S2,
+                               Table S3, Table S4
 
 Author-made Figures 1 (map screenshot) and 2 (PRISMA flowchart) are not
 produced here.
@@ -26,11 +27,13 @@ Counting units (see egm_common for the full rationale):
     Figure 6   raw entries, once per source map (high-LoE share by characteristic)
     Figure 7   per-leaf records (one per matching tumour-type leaf)
     Table 1    unique studies where study-level, raw entries where entry-level
+    Table 2    raw entries, once per source map (evidence-level bands by group)
     Figure S1  raw entries per source map
     Figure S2  per-leaf records per source map
-    Table S1   per-leaf records
-    Table S2   per-leaf records
+    Table S1   per-leaf records (total row is the fan-out column sum)
+    Table S2   per-leaf records (total row is the fan-out column sum)
     Table S3   raw entries per source map
+    Table S4   raw entries per source map (LoE by characteristic and group)
 """
 
 from __future__ import annotations
@@ -211,7 +214,7 @@ def table2_evidence_level_by_tumour_group(data, entries, idx, outdir) -> None:
 
     bands = [
         ("High-level evidence, P1 to P2, n (%)", ec.HIGH_LOE),
-        ("Moderate-level evidence, P3, n (%)", {"Level P3"}),
+        ("Medium-level evidence, P3, n (%)", {"Level P3"}),
         ("Low-level evidence, P4 to P5, n (%)", ec.LOW_LOE),
         ("Unclassifiable, n (%)", {"Unclassifiable"}),
     ]
@@ -496,7 +499,8 @@ def fig4_study_designs(data, entries, idx, outdir) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Characteristic x LoE stacked bars (shared core for Figure 5 and Figure S1)
+# Characteristic x LoE helpers: _char_loe_counts (shared by Figure 5, Figure S1
+# and Table S3) and _plot_char_loe (the Figure 5 stacked-bar renderer)
 # ---------------------------------------------------------------------------
 
 def _char_loe_counts(raw: pd.DataFrame) -> np.ndarray:
@@ -608,54 +612,84 @@ def fig5_characteristics_by_loe(data, entries, idx, outdir) -> None:
 
 
 def figS1_characteristics_by_loe_by_group(data, entries, idx, outdir) -> None:
-    """Panels two per row: characteristic x LoE, raw entries per map. For an
-    odd number of groups the legend sits in the empty grid cell beside the
-    last panel; for an even number it sits to the right of the grid."""
+    """All-maps characteristics x LoE comparison, in the report's grid and
+    sizing (one row of two or three subplots). Title and the single shared
+    x-axis and y-axis labels follow the project house style."""
     maps = idx["map_order"]
     by_map = ec.raw_entries_by_map(entries)
     n = len(maps)
-    ncols = 2 if n > 1 else 1
-    nrows = (n + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(7.5 * ncols, 4.6 * nrows),
-                             squeeze=False)
+    if n == 2:
+        nrows, ncols = 1, 2
+    elif n == 3:
+        nrows, ncols = 1, 3
+    elif n == 4:
+        nrows, ncols = 2, 2
+    else:
+        ncols, nrows = 2, (n + 1) // 2
+
+    subplot_w, subplot_h = 4.6, 3.8
+    fig_w = subplot_w * ncols + 2.4
+    fig_h = subplot_h * nrows + 1.2
+    fig, axes = plt.subplots(nrows, ncols, figsize=(fig_w, fig_h), squeeze=False)
+    axes_flat = axes.flatten()
+    draw_order = list(reversed(ec.LOE_ORDER))
+
     src_rows = []
     for k, m in enumerate(maps):
-        r, c = divmod(k, ncols)
-        raw = by_map[by_map["source_map"] == m]
-        counts = _char_loe_counts(raw)
-        _plot_char_loe(axes[r][c], counts, ec.display_map(m),
-                       callouts=False, ylabel=False)
+        ax = axes_flat[k]
+        counts = _char_loe_counts(by_map[by_map["source_map"] == m])
+        totals = counts.sum(axis=1)
+        max_total = float(totals.max()) if totals.max() > 0 else 1.0
+        inline_threshold = max(3, int(round(0.04 * max_total)))
+        x = np.arange(len(ec.CHARACTERISTIC_ORDER))
+        bottoms = np.zeros(len(ec.CHARACTERISTIC_ORDER))
+        for loe in draw_order:
+            vals = counts[:, ec.LOE_ORDER.index(loe)].astype(float)
+            ax.bar(x, vals, 0.62, bottom=bottoms, color=ec.LOE_COLOURS[loe],
+                   edgecolor="white", linewidth=0.5, label=loe)
+            rr, gg, bb = to_rgb(ec.LOE_COLOURS[loe])
+            tc = "white" if (0.299*rr + 0.587*gg + 0.114*bb) < 0.55 else "black"
+            for i, v in enumerate(vals):
+                if v >= inline_threshold:
+                    ax.text(x[i], bottoms[i] + v/2, f"{int(v)}", ha="center",
+                            va="center", fontsize=7.5, color=tc, fontweight="medium")
+            bottoms += vals
+        for xi, total in zip(x, totals):
+            if total > 0:
+                ax.text(xi, total + max_total*0.015, f"{int(total)}", ha="center",
+                        va="bottom", fontsize=8.5, fontweight="bold")
+
+        ax.set_title(ec.display_map(m), fontsize=10.5, pad=8)
+        ax.set_xticks(x)
+        ax.set_xticklabels([ec.display_char(c) for c in ec.CHARACTERISTIC_ORDER],
+                           rotation=30, ha="right", fontsize=8.5)
+        ax.tick_params(axis="y", labelsize=8.5)
+        ax.set_ylim(0, max_total * 1.15)
+        ax.yaxis.grid(True, linestyle="--", linewidth=0.4, alpha=0.5)
+        ax.set_axisbelow(True)
+        for s in ("top", "right"):
+            ax.spines[s].set_visible(False)
+
         for i, ch in enumerate(ec.CHARACTERISTIC_ORDER):
             row = {"Source map": m, "Characteristic": ch}
             for j, loe in enumerate(ec.LOE_ORDER):
                 row[loe] = int(counts[i, j])
             src_rows.append(row)
 
-    handles, labels = axes[0][0].get_legend_handles_labels()
-    label_to_handle = dict(zip(labels, handles))
-    ordered = [(label_to_handle[l], l) for l in ec.LOE_ORDER if l in label_to_handle]
-    leg_handles = [h for h, _ in ordered]
-    leg_labels = [l for _, l in ordered]
+    for k in range(n, len(axes_flat)):
+        axes_flat[k].set_visible(False)
 
-    empty = nrows * ncols - n
-    if empty:
-        # Legend in the first empty cell, beside the last panel.
-        r, c = divmod(n, ncols)
-        axes[r][c].axis("off")
-        axes[r][c].legend(leg_handles, leg_labels, title="Level of Evidence",
-                          loc="center", frameon=True, edgecolor="lightgray")
-        for k in range(n + 1, nrows * ncols):  # any further empty cells
-            r2, c2 = divmod(k, ncols)
-            axes[r2][c2].axis("off")
-    else:
-        fig.legend(leg_handles, leg_labels, title="Level of Evidence",
-                   loc="center left", bbox_to_anchor=(1.0, 0.5), frameon=True,
-                   edgecolor="lightgray")
-
+    legend_handles = [mpatches.Patch(facecolor=ec.LOE_COLOURS[loe],
+                                     edgecolor="white", label=loe)
+                      for loe in ec.LOE_ORDER]
+    fig.legend(handles=legend_handles, loc="center right",
+               bbox_to_anchor=(0.995, 0.5), frameon=True, edgecolor="lightgray",
+               fontsize=10, title="Level of Evidence", title_fontsize=10.5)
+    fig.supxlabel("Characteristics", x=0.44)
     fig.supylabel("Number of EGM entries")
     fig.suptitle(f"{ec.book_name(data)}: Characteristics by level of evidence "
                  f"per tumour group", fontsize=13)
-    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.tight_layout(rect=(0.02, 0.06, 0.86, 0.96))
     ec.save_figure(fig, ec.supplements_dir(outdir),
                    "FigureS1_characteristics_by_loe_by_group")
     ec.save_table(pd.DataFrame(src_rows), ec.supplements_dir(outdir),
@@ -664,56 +698,176 @@ def figS1_characteristics_by_loe_by_group(data, entries, idx, outdir) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tumour type x LoE per source map (Figure S2)
+# Figure S2: all-maps tumour-type x LoE comparison
 # ---------------------------------------------------------------------------
 
 def figS2_tumour_type_by_loe_by_group(data, entries, idx, outdir) -> None:
-    """One panel per source map: tumour-type leaves x LoE, per-leaf records."""
+    """All-maps tumour-type x LoE comparison, in the report's grid and sizing.
+    Each subplot's width is proportional to its tumour-type count so every bar
+    has the same on-page width. Title and the single shared x-axis and y-axis
+    labels follow the project house style."""
     maps = idx["map_order"]
     n = len(maps)
-    heights = [max(3.4, 0.42 * len(idx["map_to_leaves"][m]) + 1.6) for m in maps]
-    fig, axes = plt.subplots(n, 1, figsize=(11, sum(heights)), squeeze=False,
-                             gridspec_kw={"height_ratios": heights})
-    src_rows = []
-    for k, m in enumerate(maps):
-        ax = axes[k][0]
-        em = entries[entries["source_map"] == m]
+    draw_order = list(reversed(ec.LOE_ORDER))
+
+    if n == 4:
+        nrows, ncols = 2, 2
+        layout_rows = [[maps[0], maps[1]], [maps[2], maps[3]]]
+    elif n == 2:
+        nrows, ncols = 2, 1
+        layout_rows = [[maps[0]], [maps[1]]]
+    else:
+        nrows, ncols = 1, n
+        layout_rows = [list(maps)]
+
+    per_map_counts, per_map_totals, leaves_per_map = {}, {}, {}
+    for m in maps:
         leaves = [name for _, name in idx["map_to_leaves"][m]]
-        y = np.arange(len(leaves))
-        lefts = np.zeros(len(leaves))
-        for loe in ec.LOE_ORDER:
-            vals = np.array([int(((em["tumour_type"] == t) & (em["loe"] == loe)).sum())
-                             for t in leaves])
-            ax.barh(y, vals, left=lefts, height=0.7, color=ec.LOE_COLOURS[loe],
-                    edgecolor="white", linewidth=0.4, label=loe)
-            lefts += vals
-        ax.set_yticks(y)
-        ax.set_yticklabels(leaves, fontsize=8.5)
-        ax.invert_yaxis()
-        ax.set_xlabel("Number of records")
-        ax.set_title(ec.display_map(m))
-        ax.grid(axis="x", linestyle="--", linewidth=0.5, alpha=0.5)
+        leaves_per_map[m] = len(leaves)
+        em = entries[entries["source_map"] == m]
+        counts = np.zeros((len(leaves), len(ec.LOE_ORDER)), dtype=int)
+        for li, t in enumerate(leaves):
+            sub = em[em["tumour_type"] == t]
+            for lj, loe in enumerate(ec.LOE_ORDER):
+                counts[li, lj] = int((sub["loe"] == loe).sum())
+        per_map_counts[m] = counts
+        per_map_totals[m] = counts.sum(axis=1)
+
+    # Layout constants (mirroring the report). A left margin is reserved for
+    # the single shared y-axis label.
+    inches_per_unit = 0.42
+    y_axis_padding = 1.4
+    subplot_h = 4.6
+    legend_margin = 1.9
+    row_label_gap = 3.3
+    inter_subplot_gap = 0.4
+    left_margin = 0.9
+    top_margin = 1.0      # figure top to plot area (holds the suptitle)
+    bottom_margin = 3.2   # plot area to figure bottom (tick labels + x-label)
+
+    subplot_widths = {m: inches_per_unit * leaves_per_map[m] + y_axis_padding
+                      for m in maps}
+    row_widths = [sum(subplot_widths[s] for s in row)
+                  + inter_subplot_gap * (len(row) - 1) for row in layout_rows]
+    plot_area_w = max(row_widths)
+    fig_w = left_margin + plot_area_w + legend_margin
+    fig_h = subplot_h * nrows + row_label_gap * (nrows - 1) + top_margin + bottom_margin
+
+    fig = plt.figure(figsize=(fig_w, fig_h))
+    axes_map = {}
+    first_in_row = set()
+    for row_idx, row_keys in enumerate(layout_rows):
+        first_in_row.add(row_keys[0])
+        top_in = fig_h - top_margin - row_idx * (subplot_h + row_label_gap)
+        bottom_in = top_in - subplot_h
+        row_w = row_widths[row_idx]
+        row_left_in = left_margin + (plot_area_w - row_w) / 2
+        x_cursor = row_left_in
+        for s in row_keys:
+            w = subplot_widths[s]
+            ax = fig.add_axes((x_cursor / fig_w, bottom_in / fig_h,
+                               w / fig_w, subplot_h / fig_h))
+            axes_map[s] = ax
+            x_cursor += w + inter_subplot_gap
+
+    src_rows = []
+    for m in maps:
+        ax = axes_map[m]
+        counts = per_map_counts[m]
+        totals = per_map_totals[m]
+        leaves = [name for _, name in idx["map_to_leaves"][m]]
+        n_leaves = len(leaves)
+        max_total = float(totals.max()) if totals.max() > 0 else 1.0
+        inline_threshold = max(3, int(round(0.05 * max_total)))
+        x = np.arange(n_leaves)
+        bottoms = np.zeros(n_leaves)
+        for loe in draw_order:
+            vals = counts[:, ec.LOE_ORDER.index(loe)].astype(float)
+            ax.bar(x, vals, 0.62, bottom=bottoms, color=ec.LOE_COLOURS[loe],
+                   edgecolor="white", linewidth=0.5, label=loe)
+            rr, gg, bb = to_rgb(ec.LOE_COLOURS[loe])
+            tc = "white" if (0.299*rr + 0.587*gg + 0.114*bb) < 0.55 else "black"
+            for i, v in enumerate(vals):
+                if v >= inline_threshold:
+                    ax.text(x[i], bottoms[i] + v/2, f"{int(v)}", ha="center",
+                            va="center", fontsize=7.5, color=tc, fontweight="medium")
+            bottoms += vals
+        for xi, total in zip(x, totals):
+            if total > 0:
+                ax.text(xi, total + max_total*0.015, f"{int(total)}", ha="center",
+                        va="bottom", fontsize=8.5, fontweight="bold")
+
+        title = ec.display_map(m)
+        if len(title) > 38:
+            mid = len(title) // 2
+            sp = title.rfind(" ", 0, mid + 8)
+            if sp > 0:
+                title = title[:sp] + "\n" + title[sp + 1:]
+        ax.set_title(title, fontsize=10.5, pad=8)
+        ax.set_xticks(x)
+        ax.set_xticklabels(leaves, rotation=45, ha="right",
+                           fontsize=7.5 if n_leaves > 12 else 8.5)
+        # Pad the x-range so one data unit always equals inches_per_unit on page.
+        axes_width_inches = ax.get_position().width * fig_w
+        target_range = max(n_leaves, axes_width_inches / inches_per_unit)
+        extra = (target_range - n_leaves) / 2
+        ax.set_xlim(-0.5 - extra, n_leaves - 0.5 + extra)
+        ax.tick_params(axis="y", labelsize=8.5)
+        ax.set_ylim(0, max_total * 1.15)
+        ax.yaxis.grid(True, linestyle="--", linewidth=0.4, alpha=0.5)
         ax.set_axisbelow(True)
         for s in ("top", "right"):
             ax.spines[s].set_visible(False)
+
         for t in leaves:
+            sub = entries[(entries["source_map"] == m) & (entries["tumour_type"] == t)]
             row = {"Source map": m, "Tumour type": t}
-            sub = em[em["tumour_type"] == t]
             for loe in ec.LOE_ORDER:
                 row[loe] = int((sub["loe"] == loe).sum())
             row["Total"] = int(len(sub))
             src_rows.append(row)
-    handles, labels = axes[0][0].get_legend_handles_labels()
-    fig.legend(handles, labels, title="Level of evidence",
-               loc="upper right", frameon=False)
-    fig.suptitle(f"Tumour types by level of evidence per source map, "
-                 f"{ec.book_name(data)}", y=1.0, fontsize=13)
-    fig.tight_layout(rect=[0, 0, 1, 0.99])
+
+    legend_handles = [mpatches.Patch(facecolor=ec.LOE_COLOURS[loe],
+                                     edgecolor="white", label=loe)
+                      for loe in ec.LOE_ORDER]
+    fig.legend(handles=legend_handles, loc="center right",
+               bbox_to_anchor=(0.995, 0.5), frameon=True, edgecolor="lightgray",
+               fontsize=10, title="Level of Evidence", title_fontsize=10.5)
+    # Place the shared title, x-axis and y-axis labels relative to the actual
+    # rendered text, so they clear tick labels and subplot titles of any length.
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    inv = fig.transFigure.inverted()
+    title_top = 0.0
+    for m in maps:
+        bb = axes_map[m].title.get_window_extent(renderer).transformed(inv)
+        title_top = max(title_top, bb.y1)
+    label_bottom = 1.0
+    for m in layout_rows[-1]:
+        for lbl in axes_map[m].get_xticklabels():
+            bb = lbl.get_window_extent(renderer).transformed(inv)
+            label_bottom = min(label_bottom, bb.y0)
+    # In multi-row layouts the upper rows' rotated x-tick labels reach down
+    # toward the figure's vertical centre where the y-label sits, so shift the
+    # y-label left of them. Single-row layouts keep the default position.
+    ylabel_x = 0.02
+    for row in layout_rows[:-1]:
+        for m in row:
+            for lbl in axes_map[m].get_xticklabels():
+                bb = lbl.get_window_extent(renderer).transformed(inv)
+                ylabel_x = min(ylabel_x, bb.x0 - 0.3 / fig_w)
+    ylabel_x = max(-0.06, ylabel_x)
+    gap = 0.35 / fig_h
+    fig.suptitle(f"{ec.book_name(data)}: Tumour types by level of evidence "
+                 f"per tumour group", fontsize=13, y=title_top + gap)
+    fig.supxlabel("Tumour type", x=(left_margin + plot_area_w / 2) / fig_w,
+                  y=label_bottom - gap)
+    fig.supylabel("Number of EGM entries", x=ylabel_x)
     ec.save_figure(fig, ec.supplements_dir(outdir),
                    "FigureS2_tumour_type_by_loe_by_group")
     ec.save_table(pd.DataFrame(src_rows), ec.supplements_dir(outdir),
                   "FigureS2_tumour_type_by_loe_by_group_data")
-    print(f"[FigureS2] saved. {n} panel(s).")
+    print(f"[FigureS2] saved. {n} panel(s) in {nrows}x{ncols} grid.")
 
 
 # ---------------------------------------------------------------------------
@@ -912,9 +1066,10 @@ def _letter(pos: int) -> str:
 
 def _per_map_axis_table(entries, idx, outdir, axis_values, axis_col,
                         base_name, descriptor, with_pct=False):
-    """Shared core for Table S1 (characteristic), S2 (LoE) and S3 (char x LoE
-    is handled separately). Here axis is a single categorical column counted
-    against tumour-type leaves, one TSV per source map."""
+    """Shared core for Table S1 (tumour type x characteristic) and Table S2
+    (tumour type x LoE): one categorical axis counted against tumour-type
+    leaves, written as one TSV per source map. Table S3 is built separately.
+    The total row is the fan-out column sum, so it equals the rows above."""
     maps = idx["map_order"]
     supp = ec.supplements_dir(outdir)
     saved = []
@@ -929,12 +1084,12 @@ def _per_map_axis_table(entries, idx, outdir, axis_values, axis_col,
                 row[v] = f"{int((sub[axis_col] == v).sum()):,}"
             row["Total n"] = f"{len(sub):,}"
             rows.append(row)
-        # Group total uses entry-once-per-map (raw entries within the map).
-        raw_m = em.drop_duplicates("entry_id")
+        # Total row is the column sum of the tumour-type rows above (fan-out
+        # counts), so it adds up to exactly what is displayed.
         total_row = {"Tumour group": "", "Tumour type": f"Total: {m}"}
         for v in axis_values:
-            total_row[v] = f"{int((raw_m[axis_col] == v).sum()):,}"
-        total_row["Total n"] = f"{len(raw_m):,}"
+            total_row[v] = f"{int((em[axis_col] == v).sum()):,}"
+        total_row["Total n"] = f"{len(em):,}"
         rows.append(total_row)
 
         name = f"{base_name}{_letter(pos)}_{ec.map_slug(m)}_{descriptor}"
@@ -992,49 +1147,6 @@ def tableS3_characteristics_by_loe(data, entries, idx, outdir) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Supplementary HETP table (anglicised study-design to LoE lookup)
-# ---------------------------------------------------------------------------
-
-HETP_LOOKUP_CANDIDATES = [
-    "01_study_design_to_loe_HETP.json",
-    "study_design_to_loe_HETP.json",
-    "2_study_design_to_loe_HETP.json",
-]
-
-
-def supp_hetp(data, entries, idx, outdir) -> None:
-    """Render the HETP study-design to LoE lookup as a supplementary table,
-    anglicised at the display layer. The lookup file is searched for next to
-    this script and next to the merged JSON. If not found, the step is skipped
-    with a note rather than failing the run."""
-    search = []
-    here = Path(__file__).resolve().parent
-    base = Path(outdir)
-    for cand in HETP_LOOKUP_CANDIDATES:
-        search.append(here / cand)
-        search.append(base / cand)
-    path = next((p for p in search if p.exists()), None)
-    if path is None:
-        print("[HETP] lookup JSON not found next to script or output dir, "
-              "skipping. Looked for: " + ", ".join(HETP_LOOKUP_CANDIDATES))
-        return
-
-    lookup = ec.load_merged(str(path))
-    rows = []
-    if isinstance(lookup, dict):
-        items = lookup.items()
-    else:
-        items = []
-    for design, loe in items:
-        rows.append({"Study design": ec.display_design(design),
-                     "Level of evidence": loe})
-    rows.sort(key=lambda r: str(r["Study design"]).lower())
-    ec.save_table(pd.DataFrame(rows), ec.supplements_dir(outdir),
-                  "SupplementaryTable_HETP_study_design_to_loe")
-    print(f"[HETP] saved {len(rows)} study-design rows from {path.name}")
-
-
-# ---------------------------------------------------------------------------
 # Registry and main
 # ---------------------------------------------------------------------------
 
@@ -1054,7 +1166,6 @@ BUILDERS = {
     "tableS2_type_by_loe":                   tableS2_type_by_loe,
     "tableS3_characteristics_by_loe":        tableS3_characteristics_by_loe,
     "tableS4_loe_by_characteristic_and_group": tableS4_loe_by_characteristic_and_group,
-    "supp_hetp":                             supp_hetp,
 }
 
 
