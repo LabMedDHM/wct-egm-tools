@@ -573,7 +573,7 @@ def _plot_char_loe(ax, counts: np.ndarray, title: str,
                        rotation=30, ha="right")
     ax.set_xlabel("Characteristics", labelpad=8)
     if ylabel:
-        ax.set_ylabel("Number of EGM entries")
+        ax.set_ylabel("Number of evidence and gap map entries")
     ax.set_title(title)
     ax.set_ylim(0, max_total * 1.12)
     ax.grid(axis="y", linestyle="--", linewidth=0.5, alpha=0.5)
@@ -588,7 +588,7 @@ def fig5_characteristics_by_loe(data, entries, idx, outdir) -> None:
     counts = _char_loe_counts(raw)
     fig, ax = plt.subplots(figsize=(11, 7))
     _plot_char_loe(ax, counts,
-                   f"{ec.book_name(data)}: Characteristics by level of evidence",
+                   f"{ec.book_name(data)}: characteristics by level of evidence",
                    inline_labels=True, callouts=False)
     # Legend in canonical LoE order (P1 first) outside on the right with a grey
     # border, matching the Uro paper Figure 4.
@@ -597,7 +597,7 @@ def fig5_characteristics_by_loe(data, entries, idx, outdir) -> None:
     ordered = [(label_to_handle[l], l) for l in ec.LOE_ORDER if l in label_to_handle]
     leg = ax.legend([h for h, _ in ordered], [l for _, l in ordered],
                     loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=True,
-                    edgecolor="lightgray", fontsize=10, title="Level of Evidence",
+                    edgecolor="lightgray", fontsize=10, title="Level of evidence",
                     title_fontsize=10.5)
     leg.get_frame().set_linewidth(0.6)
     fig.tight_layout()
@@ -686,7 +686,7 @@ def figS1_characteristics_by_loe_by_group(data, entries, idx, outdir) -> None:
                bbox_to_anchor=(0.995, 0.5), frameon=True, edgecolor="lightgray",
                fontsize=10, title="Level of Evidence", title_fontsize=10.5)
     fig.supxlabel("Characteristics", x=0.44)
-    fig.supylabel("Number of EGM entries")
+    fig.supylabel("Number of evidence and map entries")
     fig.suptitle(f"{ec.book_name(data)}: Characteristics by level of evidence "
                  f"per tumour group", fontsize=13)
     fig.tight_layout(rect=(0.02, 0.06, 0.86, 0.96))
@@ -862,7 +862,7 @@ def figS2_tumour_type_by_loe_by_group(data, entries, idx, outdir) -> None:
                  f"per tumour group", fontsize=13, y=title_top + gap)
     fig.supxlabel("Tumour type", x=(left_margin + plot_area_w / 2) / fig_w,
                   y=label_bottom - gap)
-    fig.supylabel("Number of EGM entries", x=ylabel_x)
+    fig.supylabel("Number of evidence and gap map entries", x=ylabel_x)
     ec.save_figure(fig, ec.supplements_dir(outdir),
                    "FigureS2_tumour_type_by_loe_by_group")
     ec.save_table(pd.DataFrame(src_rows), ec.supplements_dir(outdir),
